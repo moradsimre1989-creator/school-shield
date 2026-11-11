@@ -91,7 +91,7 @@ class ShieldApp(tk.Tk):
 
         # زر الإيقاف: يفتح طلب صلاحيات Windows ثم يسأل عن كلمة مرور المدير.
         # الطالب بحساب عادي لا يتجاوز طلب الصلاحيات، فالزر لا يفيده.
-        self.btn_off = tk.Button(self, text=ar("إيقاف الحماية (للمدير)"),
+        self.btn_off = tk.Button(self, text=ar("إيقاف الحماية"),
                                  command=self._toggle_off, bg=CARD, fg=MUTED,
                                  font=self.f_small, relief="flat", cursor="hand2",
                                  activebackground="#24324f", activeforeground=TXT,
@@ -169,7 +169,7 @@ class ShieldApp(tk.Tk):
     # ---------------- الأفعال ----------------
     def _activate(self) -> None:
         """زر واحد: يثبّت إن لم يكن مثبّتًا، ثم يفحص ويعرض النتيجة."""
-        if self._busy:
+        if self._busy or getattr(self, "_setup_running", False):
             return
         if self._needs_setup():
             self._set_overall("checking")
@@ -187,11 +187,19 @@ class ShieldApp(tk.Tk):
         return not setup_win.installed()
 
     def _run_setup(self) -> None:
-        """تثبيت ذاتي بضغطة واحدة: يطلب صلاحيات Windows ثم ينفّذ كل شيء."""
+        """تثبيت بضغطة واحدة: كلمة مرور الإيقاف ثم صلاحيات Windows ثم انتظار."""
         import ctypes
         from . import setup_win
+        from .auth import is_provisioned
+        password = ""
+        if not is_provisioned():
+            password = SetPasswordDialog(self).result
+            if password is None:
+                self._set_overall("red")
+                self.lbl_foot.configure(text=ar("أُلغي التثبيت"))
+                return
         org = setup_win.bundled_organization()
-        params = "--setup" + (f' "{org}"' if org else "")
+        params = f'--setup "{org}" "{password}"'
         try:
             rc = ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", str(setup_win.self_path()), params, None, 1)
@@ -199,10 +207,28 @@ class ShieldApp(tk.Tk):
             self._activate_done(None, f"تعذّر بدء التثبيت: {exc}")
             return
         if rc <= 32:
-            self._activate_done(None, "التثبيت يحتاج موافقتك على صلاحيات Windows.")
+            self._activate_done(None, "لازم توافق على طلب صلاحيات Windows.")
             return
-        self.lbl_foot.configure(text=ar("جارٍ التثبيت... اترك النافذة السوداء تعمل"))
-        self.after(20000, self._activate)
+        self._setup_running = True
+        self.btn.configure(state="disabled", text=ar("جارٍ التثبيت..."))
+        self._wait_for_setup(0)
+
+    def _wait_for_setup(self, elapsed: int) -> None:
+        """ينتظر انتهاء التثبيت - قد يستغرق دقائق بسبب تنزيل عميل الفلترة."""
+        from . import setup_win
+        if setup_win.installed():
+            self._setup_running = False
+            self.btn.configure(state="normal", text=ar("تفعيل الحماية"))
+            self._activate()
+            return
+        if elapsed >= 900:
+            self._setup_running = False
+            self.btn.configure(state="normal", text=ar("تفعيل الحماية"))
+            self._activate_done(None, "لم يكتمل التثبيت. أعد المحاولة.")
+            return
+        self.lbl_foot.configure(
+            text=ar(f"جارٍ التثبيت... ({elapsed} ثانية) - لا تغلق نافذة التثبيت"))
+        self.after(5000, lambda: self._wait_for_setup(elapsed + 5))
 
     def _activate_worker(self) -> None:
         report, error = None, None
@@ -242,32 +268,25 @@ class ShieldApp(tk.Tk):
         return sys.executable, "-m schoolshield.admin_cli"
 
     def _toggle_off(self) -> None:
-        """إيقاف أو استئناف الحماية - يتطلب صلاحيات Windows وكلمة مرور المدير معًا."""
-        import ctypes
+        """إيقاف أو استئناف الحماية - كلمة مرور المدير فقط."""
         report = checks.read_status() or {}
         paused = report.get("paused", {}).get("active", False)
-        verb = "resume" if paused else "pause --minutes 30"
-        tool, prefix = self._admin_tool()
-        params = (prefix + " " + verb).strip()
-        try:
-            rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", tool, params,
-                                                     None, 1)
-        except Exception as exc:
-            messagebox.showerror(ar("درع المدرسة"), ar(f"تعذّر التشغيل: {exc}"))
+        if not ipc.service_reachable():
+            messagebox.showwarning(ar("درع المدرسة"),
+                                   ar("خدمة الحماية لا تعمل. اضغط «تفعيل الحماية» أولًا."))
             return
-        if rc <= 32:
-            messagebox.showwarning(
-                ar("درع المدرسة"),
-                ar("هذه العملية تحتاج صلاحيات مدير Windows.\n"
-                   "حساب الطالب لا يستطيع إيقاف الحماية."),
-            )
-            return
-        self.after(2500, self._activate)
+        PasswordDialog(self, resume=paused, on_done=self._after_toggle)
+
+    def _after_toggle(self, report: dict[str, Any] | None, error: str | None) -> None:
+        if report:
+            self._render(report)
+        if error:
+            self.lbl_foot.configure(text=ar("⚠ " + error[:140]))
 
     def _sync_off_button(self, report: dict[str, Any]) -> None:
         paused = report.get("paused", {}).get("active", False)
         self.btn_off.configure(
-            text=ar("استئناف الحماية (للمدير)" if paused else "إيقاف الحماية (للمدير)"))
+            text=ar("استئناف الحماية" if paused else "إيقاف الحماية"))
 
     def _tick(self) -> None:
         """تحديث دوري من ملف الحالة الذي تكتبه الخدمة."""
@@ -343,6 +362,101 @@ class AdminDialog(tk.Toplevel):
                 ar("تم الدخول.\nالعمليات الإدارية (إيقاف مؤقت / إزالة) تُنفَّذ من:\n"
                    "schoolshield-admin  — وتتطلب صلاحيات مدير Windows."),
             )
+
+
+class SetPasswordDialog(tk.Toplevel):
+    """تُطلب مرة واحدة عند أول تفعيل: كلمة المرور التي توقف الحماية لاحقًا."""
+
+    def __init__(self, master: tk.Misc) -> None:
+        super().__init__(master)
+        self.result: str | None = None
+        self.title(ar("كلمة مرور الإيقاف"))
+        self.configure(bg=BG)
+        self.geometry("460x270")
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+        f_body = tkfont.Font(family="Segoe UI", size=12)
+        tk.Label(self, text=ar("اختر كلمة مرور"), bg=BG, fg=TXT,
+                 font=tkfont.Font(family="Segoe UI", size=17, weight="bold")
+                 ).pack(pady=(22, 4))
+        hint = ar("ستحتاجها لإيقاف الحماية لاحقًا") + "\n" + ar("الطالب لا يستطيع إيقافها بدونها")
+        tk.Label(self, text=hint, bg=BG, fg=MUTED, font=f_body,
+                 justify="center").pack(pady=(0, 14))
+        self.entry = tk.Entry(self, show="●", justify="center", font=f_body)
+        self.entry.pack(fill="x", padx=36)
+        self.entry.bind("<Return>", lambda _e: self._ok())
+        tk.Button(self, text=ar("متابعة"), command=self._ok, bg=BLUE, fg="white",
+                  relief="flat", font=f_body, pady=8, cursor="hand2"
+                  ).pack(fill="x", padx=36, pady=(14, 0))
+        self.lbl = tk.Label(self, text="", bg=BG, fg=RED, font=f_body)
+        self.lbl.pack(pady=6)
+        self.entry.focus_set()
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.wait_window(self)
+
+    def _ok(self) -> None:
+        value = self.entry.get()
+        if len(value) < 4:
+            self.lbl.configure(text=ar("٤ أحرف على الأقل"))
+            return
+        self.result = value
+        self.destroy()
+
+    def _cancel(self) -> None:
+        self.result = None
+        self.destroy()
+
+
+class PasswordDialog(tk.Toplevel):
+    """نافذة كلمة المرور لإيقاف الحماية أو استئنافها."""
+
+    def __init__(self, master: tk.Misc, resume: bool, on_done) -> None:
+        super().__init__(master)
+        self.resume = resume
+        self.on_done = on_done
+        self.title(ar("استئناف الحماية" if resume else "إيقاف الحماية"))
+        self.configure(bg=BG)
+        self.geometry("430x240")
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+        f_body = tkfont.Font(family="Segoe UI", size=12)
+        tk.Label(self, text=ar("استئناف الحماية" if resume else "إيقاف الحماية"),
+                 bg=BG, fg=TXT,
+                 font=tkfont.Font(family="Segoe UI", size=17, weight="bold")
+                 ).pack(pady=(22, 4))
+        tk.Label(self, text=ar("أدخل كلمة مرور المدير"), bg=BG, fg=MUTED,
+                 font=f_body).pack(pady=(0, 12))
+        self.entry = tk.Entry(self, show="●", justify="center", font=f_body)
+        self.entry.pack(fill="x", padx=36)
+        self.entry.bind("<Return>", lambda _e: self._submit())
+        tk.Button(self, text=ar("تأكيد"), command=self._submit, bg=BLUE, fg="white",
+                  relief="flat", font=f_body, pady=8, cursor="hand2"
+                  ).pack(fill="x", padx=36, pady=(14, 0))
+        self.lbl = tk.Label(self, text="", bg=BG, fg=RED, font=f_body, wraplength=380)
+        self.lbl.pack(pady=8)
+        self.entry.focus_set()
+
+    def _submit(self) -> None:
+        password = self.entry.get()
+        if not password:
+            self.lbl.configure(text=ar("اكتب كلمة المرور"))
+            return
+        self.lbl.configure(fg=MUTED, text=ar("جارٍ التحقق..."))
+        self.update_idletasks()
+        try:
+            reply = ipc.request("RESUME" if self.resume else "PAUSE",
+                                password=password)
+        except Exception as exc:
+            self.lbl.configure(fg=RED, text=ar(f"تعذّر الاتصال بالخدمة: {exc}"))
+            return
+        if not reply.get("ok"):
+            self.lbl.configure(fg=RED, text=ar(str(reply.get("error", "فشل"))))
+            self.entry.delete(0, tk.END)
+            return
+        self.on_done(reply.get("report"), None)
+        self.destroy()
 
 
 class ChangePasswordDialog(tk.Toplevel):

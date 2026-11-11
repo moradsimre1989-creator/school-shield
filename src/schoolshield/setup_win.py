@@ -138,7 +138,8 @@ def _shortcuts(exe: Path) -> None:
     run(["powershell", "-NoProfile", "-Command", ps], timeout=60)
 
 
-def run_setup(organization: str, progress: Progress | None = None) -> str:
+def run_setup(organization: str, progress: Progress | None = None,
+              disable_password: str = "") -> str:
     """ينفّذ التثبيت كاملًا. يرجع نصًّا فارغًا عند النجاح، أو سبب الفشل."""
     if not is_elevated():
         return "التثبيت يحتاج صلاحيات مدير Windows"
@@ -153,6 +154,10 @@ def run_setup(organization: str, progress: Progress | None = None) -> str:
         problem = _install_service(exe, progress)
         if problem:
             return problem
+        if disable_password:
+            _say(progress, "ضبط كلمة مرور الإيقاف")
+            from . import auth
+            auth.provision_if_missing(disable_password)
         _say(progress, "فرض سياسات المتصفحات وقواعد الشبكة")
         from . import hardening
         hardening.enforce_all()

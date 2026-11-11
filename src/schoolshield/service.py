@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import socket
 import threading
@@ -21,6 +22,8 @@ from . import SERVICE_DISPLAY, SERVICE_NAME, __version__
 from .config import load_policy
 from .paths import IPC_HOST, IPC_PORT, ensure_dirs
 from .winutil import log
+
+PAUSE_MINUTES = 60
 
 _STOP = threading.Event()
 _LOCK = threading.Lock()
@@ -79,9 +82,14 @@ def _handle(conn: socket.socket) -> None:
     from .ipc import ALLOWED_COMMANDS
     try:
         conn.settimeout(120)
-        raw = conn.recv(256).decode("utf-8", errors="replace").strip().upper()
+        payload = conn.recv(1024).decode("utf-8", errors="replace").strip()
+        parts = payload.split("	", 1)
+        raw = parts[0].upper()
+        password = parts[1] if len(parts) > 1 else ""
         if raw not in ALLOWED_COMMANDS:
             reply: dict[str, Any] = {"ok": False, "error": "أمر غير مسموح"}
+        elif raw in ("PAUSE", "RESUME"):
+            reply = _handle_pause(raw, password)
         elif raw == "STATUS":
             reply = {"ok": True, "report": checks.read_status() or cycle(enforce=False)}
         elif raw == "VERIFY":
@@ -100,6 +108,33 @@ def _handle(conn: socket.socket) -> None:
             conn.close()
         except OSError:
             pass
+
+
+
+def _handle_pause(command: str, password: str) -> dict[str, Any]:
+    """إيقاف أو استئناف الحماية بعد التحقق من كلمة مرور المدير.
+
+    الخدمة تعمل كـ SYSTEM فهي وحدها من يكتب ملف الإيقاف داخل المجلد المحمي.
+    """
+    from . import auth, checks
+    from .paths import PAUSE_FILE, ensure_dirs
+    from .winutil import audit
+    if not auth.is_provisioned():
+        return {"ok": False, "error": "لم تُضبط كلمة مرور للإيقاف على هذا الجهاز"}
+    if not password or not auth.verify_password(password):
+        audit("ipc_pause_denied", command)
+        return {"ok": False, "error": "كلمة المرور غير صحيحة"}
+    ensure_dirs()
+    if command == "RESUME":
+        PAUSE_FILE.unlink(missing_ok=True)
+        audit("ipc_resume", "")
+        return {"ok": True, "report": cycle(enforce=True)}
+    until = _dt.datetime.now() + _dt.timedelta(minutes=PAUSE_MINUTES)
+    PAUSE_FILE.write_text(json.dumps(
+        {"until": until.isoformat(timespec="seconds"), "by": "admin"},
+        ensure_ascii=False), encoding="utf-8")
+    audit("ipc_pause", f"minutes={PAUSE_MINUTES}")
+    return {"ok": True, "report": _verify_and_publish()}
 
 
 def _ipc_server() -> None:

@@ -204,3 +204,33 @@ def status() -> dict[str, Any]:
         "password_changed_at": data.get("password_changed_at"),
         "locked_seconds": _lock_remaining(data),
     }
+
+
+def verify_password(password: str) -> bool:
+    """تحقق من كلمة المرور فقط - تستعمله الخدمة عند طلب الإيقاف."""
+    try:
+        data = _load()
+    except AuthError:
+        return False
+    try:
+        verify(str(data.get("username") or "admin"), password)
+        return True
+    except AuthError:
+        return False
+
+
+def provision_if_missing(password: str, username: str = "admin") -> None:
+    """ينشئ حساب الإدارة عند أول تثبيت إن لم يكن موجودًا."""
+    if is_provisioned() or not password:
+        return
+    _save({
+        "username": username,
+        "hash": _HASHER.hash(password),
+        "must_change": False,
+        "created_at": _now().isoformat(timespec="seconds"),
+        "password_changed_at": _now().isoformat(timespec="seconds"),
+        "failures": 0,
+        "failure_streaks": 0,
+        "locked_until": None,
+    })
+    audit("provision", "username=" + username)

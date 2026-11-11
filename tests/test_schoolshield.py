@@ -180,10 +180,20 @@ class TestAdminAuth(unittest.TestCase):
 class TestIpcProtocol(unittest.TestCase):
     """البروتوكول لا يحتوي أي أمر لتعطيل الحماية."""
 
-    def test_no_disable_command_exists(self):
-        from schoolshield import ipc
-        for forbidden in ("DISABLE", "STOP", "OFF", "UNINSTALL", "PAUSE"):
+    def test_no_unauthenticated_disable(self):
+        """الإيقاف موجود لكنه لا يُنفَّذ بلا كلمة مرور، والإزالة ليست في البروتوكول."""
+        from schoolshield import ipc, service
+        for forbidden in ("DISABLE", "OFF", "UNINSTALL", "STOP"):
             self.assertNotIn(forbidden, ipc.ALLOWED_COMMANDS)
+        with mock.patch("schoolshield.auth.is_provisioned", return_value=True),                 mock.patch("schoolshield.auth.verify_password", return_value=False),                 mock.patch("schoolshield.winutil.audit"):
+            reply = service._handle_pause("PAUSE", "wrong-password")
+        self.assertFalse(reply["ok"])
+
+    def test_pause_rejected_without_password(self):
+        from schoolshield import service
+        with mock.patch("schoolshield.auth.is_provisioned", return_value=True),                 mock.patch("schoolshield.winutil.audit"):
+            reply = service._handle_pause("PAUSE", "")
+        self.assertFalse(reply["ok"])
 
     def test_unknown_command_rejected_client_side(self):
         from schoolshield import ipc

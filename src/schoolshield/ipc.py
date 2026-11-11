@@ -1,11 +1,9 @@
 """قناة اتصال محلية بين الواجهة والخدمة.
 
-البروتوكول مُقيَّد بثلاثة أوامر فقط: STATUS و VERIFY و ENFORCE.
-لا يوجد أمر لتعطيل الحماية - لا في البروتوكول ولا في الخدمة. الطالب لا يستطيع
-إيقاف الحماية عبر هذه القناة حتى لو كتب عميلًا خاصًا به.
-
-الإيقاف الإداري يمر عبر ملف داخل المجلد المحمي بـ ACL، أي يتطلب صلاحيات
-Administrator على مستوى النظام - لا كلمة مرور فقط.
+البروتوكول مُقيَّد بخمسة أوامر: STATUS و VERIFY و ENFORCE و PAUSE و RESUME.
+الإيقاف والاستئناف يتطلبان كلمة مرور المدير، والخدمة (SYSTEM) هي من تتحقق
+منها بتجزئة Argon2id. الطالب لا يملك الكلمة، ولا يستطيع قراءة تجزئتها لأن
+ملفها محجوب عنه بـ ACL، ولا يستطيع تجاوز القناة لأنها على loopback فقط.
 """
 from __future__ import annotations
 
@@ -15,15 +13,18 @@ from typing import Any
 
 from .paths import IPC_HOST, IPC_PORT
 
-ALLOWED_COMMANDS = ("STATUS", "VERIFY", "ENFORCE")
+ALLOWED_COMMANDS = ("STATUS", "VERIFY", "ENFORCE", "PAUSE", "RESUME")
 _MAX_PAYLOAD = 256 * 1024
 
 
-def request(command: str, timeout: float = 90.0) -> dict[str, Any]:
+def request(command: str, timeout: float = 90.0,
+            password: str | None = None) -> dict[str, Any]:
     """يرسل أمرًا إلى الخدمة ويرجع الرد JSON."""
     command = command.strip().upper()
     if command not in ALLOWED_COMMANDS:
         raise ValueError(f"أمر غير مسموح: {command}")
+    if password is not None:
+        command = command + "	" + password
     with socket.create_connection((IPC_HOST, IPC_PORT), timeout=timeout) as sock:
         sock.settimeout(timeout)
         sock.sendall((command + "\n").encode("utf-8"))
