@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+dist/
+build/_work/
+build/*.spec
+installer/Output/
+installer/Cloudflare_WARP.msi
+
+# يحتوي معرّفات حساب المدرسة - لا يُنشر
+docs/SETUP-CLOUDFLARE.md

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>درع المدرسة</title>
+<meta name="description" content="درع المدرسة - تصفّح آمن لطلابنا. حماية حواسيب المختبر المدرسي من المحتوى الإباحي والعنيف.">
+<style>
+  :root{
+    --bg:#0b1220; --card:#131f36; --card2:#1a2944; --txt:#eef2ff; --muted:#93a4c8;
+    --green:#16a34a; --red:#dc2626; --amber:#d97706; --blue:#2563eb; --line:#24365c;
+    --radius:18px; --maxw:960px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--txt); line-height:1.75;
+    font-family:"Segoe UI","Noto Naskh Arabic",system-ui,sans-serif;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 16px}
+  header{padding:56px 0 28px; text-align:center}
+  .shield{font-size:60px; line-height:1}
+  h1{font-size:clamp(28px,5vw,44px); margin:12px 0 6px}
+  .tag{color:var(--muted); font-size:clamp(15px,2.4vw,19px); margin:0}
+  .cta{
+    display:inline-block; margin:30px auto 10px; padding:18px 44px; border:0;
+    border-radius:14px; background:var(--blue); color:#fff; font-size:20px;
+    font-weight:700; cursor:pointer; text-decoration:none;
+    box-shadow:0 10px 30px rgba(37,99,235,.35); transition:transform .15s ease;
+  }
+  .cta:hover{transform:translateY(-2px)}
+  .sys{color:var(--muted); font-size:14px; margin-top:10px}
+  .grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin:34px 0}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:22px}
+  .card h3{margin:0 0 8px; font-size:19px}
+  .card p{margin:0; color:var(--muted); font-size:15px}
+  .states{display:flex; gap:14px; flex-wrap:wrap; margin:18px 0 0}
+  .state{flex:1 1 220px; background:var(--card2); border-radius:14px; padding:16px; display:flex; gap:12px; align-items:center}
+  .dot{width:26px; height:26px; border-radius:50%; flex:0 0 auto}
+  .dot.g{background:var(--green)} .dot.r{background:var(--red)} .dot.a{background:var(--amber)}
+  .state b{display:block} .state span{color:var(--muted); font-size:14px}
+  ol{padding-inline-start:22px} ol li{margin:10px 0}
+  .note{background:#1a1f33; border-inline-start:4px solid var(--amber); border-radius:12px; padding:16px 18px; margin:22px 0; color:#e9d5a1; font-size:15px}
+  footer{color:var(--muted); font-size:14px; text-align:center; padding:40px 0 60px; border-top:1px solid var(--line); margin-top:40px}
+  code{background:#0a0f1d; padding:2px 7px; border-radius:6px; font-size:14px; direction:ltr; display:inline-block}
+  h2{margin-top:44px; font-size:24px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="shield">🛡️</div>
+    <h1>درع المدرسة</h1>
+    <p class="tag">تصفّح آمن لطلابنا</p>
+    <a class="cta" id="download" href="SchoolShield-Setup.exe" download>تنزيل برنامج الحماية</a>
+    <div class="sys" id="sysinfo">جارٍ التعرّف على نظامك…</div>
+  </header>
+
+  <div class="states">
+    <div class="state"><span class="dot g"></span><div><b>الحماية مفعّلة</b><span>الفلترة شغّالة واختبارات الحجب ناجحة</span></div></div>
+    <div class="state"><span class="dot a"></span><div><b>جارٍ التحقق</b><span>الفحص قيد التنفيذ - لا ادعاء بالحماية بعد</span></div></div>
+    <div class="state"><span class="dot r"></span><div><b>الحماية غير مفعّلة</b><span>الفلترة متوقفة أو فشل فحص أساسي</span></div></div>
+  </div>
+
+  <h2>ما الذي يفعله البرنامج؟</h2>
+  <div class="grid">
+    <div class="card"><h3>يحجب الإباحية والعنف</h3><p>تصنيف محدَّث باستمرار عبر Cloudflare Gateway، لا قائمة ثابتة تقادم.</p></div>
+    <div class="card"><h3>يفرض البحث الآمن</h3><p>Google و Bing SafeSearch، ووضع YouTube المقيّد، على كل المتصفحات.</p></div>
+    <div class="card"><h3>لا يستطيع الطالب إيقافه</h3><p>خدمة دائمة + قفل مفتاح العميل + سياسات لا تُعدَّل من حساب عادي.</p></div>
+    <div class="card"><h3>لا يعطّل الدراسة</h3><p>Google Classroom و Canva و Kahoot و Wordwall و Tinkercad و Veyon تعمل كالمعتاد.</p></div>
+  </div>
+
+  <h2>خطوات التثبيت</h2>
+  <ol>
+    <li>اضغط <b>تنزيل برنامج الحماية</b>.</li>
+    <li>افتح ملف التثبيت الذي نزل.</li>
+    <li>وافق على طلب صلاحيات Windows (UAC) — هذه الموافقة إلزامية ولا يمكن تجاوزها.</li>
+    <li>يُثبَّت البرنامج وعميل الفلترة، وتُطبَّق سياسة المدرسة الجاهزة تلقائيًا.</li>
+    <li>يبدأ الفحص الحقيقي: تثبيت العميل، التسجيل، اختبار حجب، البحث الآمن، المواقع التعليمية.</li>
+    <li>يظهر المؤشر <b>أخضر</b> إذا نجحت كل الفحوص.</li>
+  </ol>
+
+  <div class="note">
+    <b>ملاحظة صريحة:</b> البرنامج يمنع حساب الطالب العادي من إيقاف الحماية أو إزالتها.
+    أمّا من يملك صلاحيات <b>Administrator</b> على Windows فلا يمكن منعه منعًا مطلقًا —
+    لذلك يجب ألّا يكون الطلاب أعضاء في مجموعة Administrators.
+    كذلك لا يوجد فلتر يحجب 100% من المحتوى غير المناسب داخل المواقع المسموح بها.
+  </div>
+
+  <h2>للمدير</h2>
+  <p class="tag">بعد التثبيت، من موجّه أوامر بصلاحيات مدير:</p>
+  <p><code>schoolshield-admin verify</code> — تشغيل الفحوص السبعة<br>
+     <code>schoolshield-admin status</code> — ملخّص الحالة<br>
+     <code>schoolshield-admin pause --minutes 15</code> — إيقاف مؤقت موثّق في سجل التدقيق</p>
+
+  <footer>
+    درع المدرسة — School Shield · الحماية تعمل حتى بعد إغلاق النافذة وبعد إعادة تشغيل الحاسوب
+  </footer>
+</div>
+
+<script>
+// التعرّف على النظام لعرض الملف المناسب. لا ندّعي دعم ما ليس مدعومًا.
+(function () {
+  const info = document.getElementById('sysinfo');
+  const btn = document.getElementById('download');
+  const ua = navigator.userAgent;
+  const isWindows = /Windows NT/i.test(ua);
+  const is64 = /WOW64|Win64|x64/i.test(ua) || (navigator.userAgentData && navigator.userAgentData.platform === 'Windows');
+  if (!isWindows) {
+    info.textContent = 'هذا البرنامج لأجهزة Windows 10 و Windows 11 فقط. افتح الصفحة من حاسوب الطالب.';
+    btn.setAttribute('aria-disabled', 'true');
+    btn.style.opacity = '.55';
+    btn.style.pointerEvents = 'none';
+    return;
+  }
+  const m = ua.match(/Windows NT ([\d.]+)/);
+  let name = 'Windows';
+  if (m) {
+    // Windows 11 يُعلن عن نفسه NT 10.0 أيضًا - لا نخمّن الإصدار بدقة
+    name = m[1] === '10.0' ? 'Windows 10 / 11' : 'Windows ' + m[1];
+  }
+  info.textContent = `النظام المكتشف: ${name} · ${is64 ? '64-بت' : '32-بت'} · حجم الملف يُنزَّل مرة واحدة لكل جهاز`;
+  if (!is64) {
+    info.textContent += ' — تأكّد من توفّر إصدار 32-بت من عميل الفلترة قبل التوزيع.';
+  }
+})();
+</script>
+</body>
+</html>

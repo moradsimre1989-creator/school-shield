@@ -1,0 +1,6 @@
+pywin32>=306
+argon2-cffi>=23.1.0
+dnspython>=2.6.1
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+pyinstaller>=6.6.0
