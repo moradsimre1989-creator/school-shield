@@ -21,7 +21,7 @@ param(
   [string]$SupportUrl = "",
   [string]$WarpMsi = "",
   [switch]$SkipWarp,
-  [switch]$SkipAdminAccount
+  [switch]$WithAdminAccount
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +35,11 @@ function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 function Ok($text)   { Write-Host "   [تم] $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "   [تنبيه] $text" -ForegroundColor Yellow }
 
+# اسم الفريق: من المعامل، أو من ملف school.cfg بجانب المثبّت، أو بالسؤال
+if (-not $Organization) {
+  $cfg = Join-Path $PSScriptRoot "school.cfg"
+  if (Test-Path $cfg) { $Organization = (Get-Content $cfg -Raw).Trim() }
+}
 if (-not $Organization) {
   Write-Host ""
   Write-Host "ادخل اسم فريق المدرسة في Cloudflare Zero Trust" -ForegroundColor Cyan
@@ -182,7 +187,7 @@ foreach ($target in @(
 Ok "أُنشئت الاختصارات"
 
 # ------------------------------------------------------------------
-if (-not $SkipAdminAccount) {
+if ($WithAdminAccount) {
   Step "إنشاء حساب المدير"
   $adminFile = Join-Path $SecureDir "admin.json"
   if (Test-Path $adminFile) {

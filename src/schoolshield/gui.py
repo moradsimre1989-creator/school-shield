@@ -168,13 +168,41 @@ class ShieldApp(tk.Tk):
 
     # ---------------- الأفعال ----------------
     def _activate(self) -> None:
+        """زر واحد: يثبّت إن لم يكن مثبّتًا، ثم يفحص ويعرض النتيجة."""
         if self._busy:
+            return
+        if self._needs_setup():
+            self._set_overall("checking")
+            self.lbl_foot.configure(text=ar("التثبيت لأول مرة..."))
+            self._run_setup()
             return
         self._busy = True
         self.btn.configure(state="disabled", text=ar("جارٍ التحقق..."))
         self._set_overall("checking")
         self._write_details([])
         threading.Thread(target=self._activate_worker, daemon=True).start()
+
+    def _needs_setup(self) -> bool:
+        from . import setup_win
+        return not setup_win.installed()
+
+    def _run_setup(self) -> None:
+        """تثبيت ذاتي بضغطة واحدة: يطلب صلاحيات Windows ثم ينفّذ كل شيء."""
+        import ctypes
+        from . import setup_win
+        org = setup_win.bundled_organization()
+        params = "--setup" + (f' "{org}"' if org else "")
+        try:
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", str(setup_win.self_path()), params, None, 1)
+        except Exception as exc:
+            self._activate_done(None, f"تعذّر بدء التثبيت: {exc}")
+            return
+        if rc <= 32:
+            self._activate_done(None, "التثبيت يحتاج موافقتك على صلاحيات Windows.")
+            return
+        self.lbl_foot.configure(text=ar("جارٍ التثبيت... اترك النافذة السوداء تعمل"))
+        self.after(20000, self._activate)
 
     def _activate_worker(self) -> None:
         report, error = None, None
