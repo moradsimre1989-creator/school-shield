@@ -37,13 +37,25 @@ def _enforce() -> dict[str, Any]:
 
 
 def _ensure_client_connected() -> None:
-    from . import warp
+    from . import setup_win, warp
     if not warp.installed():
         return
     st = warp.status()
-    if not st["connected"]:
-        log("العميل غير متصل - محاولة إعادة الوصل")
-        warp.connect()
+    if st["connected"]:
+        return
+    log("العميل غير متصل - محاولة إعادة الوصل")
+    warp.connect()
+    # تسجيل مفقود + توكن مدرسة متوفّر = سجّل الجهاز بلا تدخّل المستخدم
+    if not warp.registration().get("ok"):
+        token_id, token_secret = setup_win.bundled_service_token()
+        if token_id and token_secret:
+            log("تسجيل الجهاز بتوكن المدرسة")
+            warp.write_mdm(load_policy().get("organization", ""),
+                           switch_locked=True, auto_connect=1,
+                           service_mode="warp", onboarding=False,
+                           auth_client_id=token_id,
+                           auth_client_secret=token_secret)
+            setup_win._register_with_token(None)
 
 
 def _verify_and_publish() -> dict[str, Any]:

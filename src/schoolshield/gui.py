@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
+import pathlib
 import threading
 import tkinter as tk
 from tkinter import font as tkfont
@@ -127,7 +129,7 @@ class ShieldApp(tk.Tk):
 
     # ---------------- الحالة ----------------
     def _set_overall(self, key: str) -> None:
-        text, color, sub = OVERALL[key]
+        text, color, sub = OVERALL.get(key, OVERALL["red"])
         self.lbl_status.configure(text=ar(text), fg=color)
         self.dot.itemconfigure(self.dot_id, fill=color)
         self.lbl_sub.configure(text=ar(sub))
@@ -136,10 +138,12 @@ class ShieldApp(tk.Tk):
         self.details.configure(state="normal")
         self.details.delete("1.0", tk.END)
         for item in items:
-            label, _c = STATE_LABELS.get(item["state"], ("؟", MUTED))
-            mark = {"pass": "✔", "fail": "✘", "unverified": "⚠"}.get(item["state"], "•")
-            line = ar(f"{item['title']} — {label} {mark}")
-            self.details.insert(tk.END, line + "\n", item["state"])
+            state = item.get("state", "unverified")
+            label, _c = STATE_LABELS.get(state, ("؟", MUTED))
+            mark = {"pass": "✔", "fail": "✘", "unverified": "⚠"}.get(state, "•")
+            line = ar(f"{item.get('title', '?')} — {label} {mark}")
+            tag = state if state in STATE_LABELS else "line"
+            self.details.insert(tk.END, line + "\n", tag)
             if item.get("detail"):
                 self.details.insert(tk.END, ar(item["detail"][:220]) + "\n", "detail")
         self.details.configure(state="disabled")
@@ -153,7 +157,16 @@ class ShieldApp(tk.Tk):
             self.lbl_foot.configure(text=ar("لا يوجد فحص سابق - اضغط تفعيل الحماية"))
 
     def _render(self, report: dict[str, Any]) -> None:
-        self._set_overall(report.get("overall", "red"))
+        overall = report.get("overall", "red")
+        stale = False
+        try:
+            seen = _dt.datetime.fromisoformat(str(report.get("checked_at", "")))
+            stale = (_dt.datetime.now() - seen) > _dt.timedelta(minutes=10)
+        except (TypeError, ValueError):
+            stale = True
+        if stale and overall == "green":
+            overall = "amber"   # لا نقول "محمي" بناءً على تقرير قديم
+        self._set_overall(overall)
         self._write_details(report.get("checks", []))
         self._sync_off_button(report)
         summary = report.get("summary", {})
@@ -199,7 +212,18 @@ class ShieldApp(tk.Tk):
                 self.lbl_foot.configure(text=ar("أُلغي التثبيت"))
                 return
         org = setup_win.bundled_organization()
-        params = f'--setup "{org}" "{password}"'
+        # لا تُمرَّر كلمة المرور في سطر الأوامر: أي مستخدم يراها في مدير المهام
+        secret_file = ""
+        if password:
+            import tempfile
+            import uuid
+            handle = pathlib.Path(tempfile.gettempdir()) / f"ss-{uuid.uuid4().hex}.tmp"
+            try:
+                handle.write_text(password, encoding="utf-8")
+                secret_file = str(handle)
+            except OSError:
+                secret_file = ""
+        params = f'--setup "{org}" "{secret_file}"'
         try:
             rc = ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", str(setup_win.self_path()), params, None, 1)
@@ -214,21 +238,25 @@ class ShieldApp(tk.Tk):
         self._wait_for_setup(0)
 
     def _wait_for_setup(self, elapsed: int) -> None:
-        """ينتظر انتهاء التثبيت - قد يستغرق دقائق بسبب تنزيل عميل الفلترة."""
+        """ينتظر انتهاء التثبيت. أي استثناء هنا كان يترك الزر معطّلًا للأبد."""
         from . import setup_win
-        if setup_win.installed():
+        try:
+            done = setup_win.installed()
+        except Exception:
+            done = False
+        if done or elapsed >= 900:
             self._setup_running = False
             self.btn.configure(state="normal", text=ar("تفعيل الحماية"))
-            self._activate()
+            if done:
+                self._activate()
+            else:
+                self._activate_done(None, "لم يكتمل التثبيت. أعد المحاولة.")
             return
-        if elapsed >= 900:
-            self._setup_running = False
-            self.btn.configure(state="normal", text=ar("تفعيل الحماية"))
-            self._activate_done(None, "لم يكتمل التثبيت. أعد المحاولة.")
-            return
-        self.lbl_foot.configure(
-            text=ar(f"جارٍ التثبيت... ({elapsed} ثانية) - لا تغلق نافذة التثبيت"))
-        self.after(5000, lambda: self._wait_for_setup(elapsed + 5))
+        try:
+            self.lbl_foot.configure(
+                text=ar(f"جارٍ التثبيت... ({elapsed} ثانية) - لا تغلق نافذة التثبيت"))
+        finally:
+            self.after(5000, lambda: self._wait_for_setup(elapsed + 5))
 
     def _activate_worker(self) -> None:
         report, error = None, None
@@ -290,11 +318,15 @@ class ShieldApp(tk.Tk):
 
     def _tick(self) -> None:
         """تحديث دوري من ملف الحالة الذي تكتبه الخدمة."""
-        if not self._busy:
-            report = checks.read_status()
-            if report:
-                self._render(report)
-        self.after(15000, self._tick)
+        try:
+            if not self._busy and not getattr(self, "_setup_running", False):
+                report = checks.read_status()
+                if report:
+                    self._render(report)
+        except Exception:
+            pass
+        finally:
+            self.after(15000, self._tick)
 
     def _admin_login(self) -> None:
         AdminDialog(self)
@@ -447,7 +479,7 @@ class PasswordDialog(tk.Toplevel):
         self.update_idletasks()
         try:
             reply = ipc.request("RESUME" if self.resume else "PAUSE",
-                                password=password)
+                                timeout=20.0, password=password)
         except Exception as exc:
             self.lbl.configure(fg=RED, text=ar(f"تعذّر الاتصال بالخدمة: {exc}"))
             return

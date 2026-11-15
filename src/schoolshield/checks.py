@@ -37,7 +37,11 @@ def _batch(domains: list[str]) -> dict[str, dict[str, Any]]:
     with _cf.ThreadPoolExecutor(max_workers=min(8, len(domains))) as ex:
         futs = {ex.submit(netcheck.resolve, d): d for d in domains}
         for fut in _cf.as_completed(futs):
-            out[futs[fut]] = fut.result()
+            try:
+                out[futs[fut]] = fut.result()
+            except Exception as exc:
+                out[futs[fut]] = {"state": netcheck.INCONCLUSIVE, "ips": [],
+                                  "cnames": [], "detail": str(exc)[:100]}
     return out
 
 
@@ -50,7 +54,9 @@ def check_client() -> dict[str, Any]:
         return _result("client", title, FAIL, "عميل Cloudflare One غير مثبّت على الجهاز")
     st = warp.status()
     if not st["ok"]:
-        return _result("client", title, FAIL, "العميل مثبّت لكن خدمته لا تستجيب")
+        # سبب شائع بعد أول تثبيت: درايفر الشبكة لا يعمل قبل إعادة التشغيل
+        return _result("client", title, FAIL,
+                       "تم تثبيت العميل - أعد تشغيل الحاسوب لإكمال التفعيل")
     if not st["connected"]:
         return _result("client", title, FAIL, "العميل غير متصل: " + st["raw"][:120])
     return _result("client", title, PASS, st["raw"][:120])
@@ -75,8 +81,12 @@ def check_registration() -> dict[str, Any]:
     if not org_expected:
         return _result("registration", title, UNVERIFIED,
                        "اسم مؤسسة المدرسة غير مُعدّ في policy.json")
-    if not reg.get("ok"):
+    if not reg.get("ok") or not reg.get("team_managed"):
         return _result("registration", title, FAIL, "لا يوجد تسجيل فعّال للجهاز")
+    org_client = str(reg.get("organization") or "").strip()
+    if org_client and org_client.lower() != org_expected.lower():
+        return _result("registration", title, FAIL,
+                       "الجهاز مسجّل في مؤسسة أخرى: " + org_client)
     if org_mdm.lower() != org_expected.lower():
         return _result("registration", title, FAIL,
                        "إعداد العميل لا يطابق مؤسسة المدرسة (" + detail + ")")
@@ -93,8 +103,14 @@ def check_adult_block() -> dict[str, Any]:
     blocked = [i for i in items if i["state"] == BLOCKED]
     allowed = [i for i in items if i["state"] == ALLOWED]
     extra = _batch(list(policy["probe_category_guess"]))
-    items += [dict({"domain": d, "note": "نطاق اختبار غير موثّق رسميًا"}, **v)
-              for d, v in extra.items()]
+    extra_items = [dict({"domain": d, "note": "نطاق اختبار غير موثّق رسميًا"}, **v)
+                   for d, v in extra.items()]
+    items += extra_items
+    extra_allowed = [i for i in extra_items if i["state"] == ALLOWED]
+    if extra_allowed and not allowed:
+        return _result("adult_block", title, FAIL,
+                       "نطاقات فئة الإباحية غير محجوبة: "
+                       + ", ".join(i["domain"] for i in extra_allowed), items)
     if allowed:
         return _result("adult_block", title, FAIL,
                        "نطاقات غير محجوبة: " + ", ".join(i["domain"] for i in allowed), items)
@@ -123,6 +139,9 @@ def check_violence_block() -> dict[str, Any]:
     if not blocked:
         return _result("violence_block", title, UNVERIFIED,
                        "النطاقات غير حاسمة (غير موجودة أو تعذّر الاستعلام)", items)
+    if len(blocked) < len(domains):
+        return _result("violence_block", title, UNVERIFIED,
+                       f"محجوب {len(blocked)} من {len(domains)}، والباقي غير حاسم", items)
     return _result("violence_block", title, PASS,
                    f"محجوب {len(blocked)}/{len(domains)}", items)
 
@@ -141,17 +160,22 @@ def _browser_policy_state() -> dict[str, str]:
 def check_safesearch() -> dict[str, Any]:
     """5) فرض البحث الآمن ووضع YouTube المقيّد."""
     title = "فرض البحث الآمن و YouTube المقيّد"
+    level = int(load_policy().get("youtube_restrict_level", 2))
     expectations = {
         "www.google.com": "forcesafesearch.google.com",
         "www.bing.com": "strict.bing.com",
-        "www.youtube.com": "restrict",
+        "www.youtube.com": ("restrict.youtube.com" if level >= 2
+                            else "restrictmoderate.youtube.com"),
     }
     items: list[dict[str, Any]] = []
     ok = 0
     missing: list[str] = []
+    system_fallback = False
     for domain, needle in expectations.items():
         info = netcheck.safesearch_target(domain)
-        hit = needle in info["raw"]
+        hit = any(c.lower().rstrip(".") == needle for c in info["cnames"])
+        if not hit and netcheck.SYSTEM_DETAIL in str(info.get("detail", "")):
+            system_fallback = True
         items.append({"domain": domain, "expected": needle, "cnames": info["cnames"],
                       "state": PASS if hit else FAIL})
         if hit:
@@ -161,6 +185,9 @@ def check_safesearch() -> dict[str, Any]:
     reg = _browser_policy_state()
     items.append({"domain": "سياسات المتصفحات (Registry)", "state": reg["state"],
                   "detail": reg["detail"]})
+    if system_fallback and ok < len(expectations):
+        return _result("safesearch", title, UNVERIFIED,
+                       "تعذّر فحص DNS بدقّة على هذا الجهاز", items)
     if ok == 0 and reg["state"] != PASS:
         return _result("safesearch", title, FAIL,
                        "لا DNS ولا سياسات المتصفح تفرض البحث الآمن", items)
@@ -219,12 +246,20 @@ ALL_CHECKS: tuple[Callable[[], dict[str, Any]], ...] = (
 def pause_state() -> dict[str, Any]:
     """إيقاف إداري مؤقت - يُقرأ من ملف محمي بـ ACL للمديرين فقط."""
     try:
-        data = json.loads(PAUSE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(PAUSE_FILE.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        return {"active": False}
+    except (PermissionError, OSError, ValueError):
+        # حساب الطالب لا يقرأ الملف: نقول "مجهول" بدل "غير موقوف"
+        return {"active": False, "unknown": True}
+    try:
         until = _dt.datetime.fromisoformat(data["until"])
+        if until.tzinfo is not None:
+            until = until.astimezone().replace(tzinfo=None)
         if until > _dt.datetime.now():
             return {"active": True, "until": data["until"], "by": data.get("by", "?")}
-    except (OSError, ValueError, KeyError):
-        pass
+    except (KeyError, ValueError, TypeError):
+        return {"active": False, "unknown": True}
     return {"active": False}
 
 
@@ -242,6 +277,8 @@ def run_all() -> dict[str, Any]:
     paused = pause_state()
     if paused.get("active"):
         overall = "red"
+    elif paused.get("unknown") and overall == "green":
+        overall = "amber"
     return {
         "overall": overall,
         "checked_at": _dt.datetime.now().isoformat(timespec="seconds"),

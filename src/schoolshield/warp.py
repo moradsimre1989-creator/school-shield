@@ -101,8 +101,19 @@ def read_mdm() -> dict[str, Any]:
 
 def write_mdm(organization: str, *, switch_locked: bool = True,
               auto_connect: int = 1, service_mode: str = "warp",
-              support_url: str = "", onboarding: bool = False) -> None:
-    """يكتب إعدادات العميل المُدارة. لا يحتوي الملف أي أسرار إدارية."""
+              support_url: str = "", onboarding: bool = False,
+              auth_client_id: str = "", auth_client_secret: str = "") -> None:
+    """يكتب إعدادات العميل المُدارة.
+
+    مع توكن الخدمة (auth_client_id/secret) يسجّل الجهاز نفسه تلقائيًا بلا
+    تسجيل دخول. الملف يُحفظ في مجلد تقرؤه مجموعة Users فقط، ولا يُكتب
+    التوكن إلا إذا مُرّر صراحةً.
+    """
+    from xml.sax.saxutils import escape
+    organization = escape(organization)
+    support_url = escape(support_url)
+    auth_client_id = escape(auth_client_id)
+    auth_client_secret = escape(auth_client_secret)
     WARP_MDM_FILE.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
@@ -120,6 +131,10 @@ def write_mdm(organization: str, *, switch_locked: bool = True,
     ]
     if support_url:
         lines += ["  <key>support_url</key>", f"  <string>{support_url}</string>"]
+    if auth_client_id and auth_client_secret:
+        lines += ["  <key>auth_client_id</key>", f"  <string>{auth_client_id}</string>",
+                  "  <key>auth_client_secret</key>",
+                  f"  <string>{auth_client_secret}</string>"]
     lines.append("</dict>")
     WARP_MDM_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

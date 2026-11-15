@@ -22,35 +22,50 @@ from schoolshield.config import CF_BLOCK_IPS  # noqa: E402
 class TestBlockDetection(unittest.TestCase):
     """تصنيف ردود DNS: ما الذي يُعتبر حجبًا فعليًا؟"""
 
+    def _resolve_with(self, ips):
+        """يشغّل resolve() بخادم أسماء مُحاكى بعد اجتياز اكتشاف الخوادم."""
+        fake = mock.MagicMock()
+        fake.resolve.return_value = _answer(ips)
+        with mock.patch.object(netcheck, "usable_resolver", return_value=fake):
+            return netcheck.resolve("example.com")
+
     def test_block_page_ips_mean_blocked(self):
         for ip in CF_BLOCK_IPS:
-            with mock.patch.object(netcheck.dns.resolver, "Resolver") as R:
-                R.return_value.resolve.return_value = _answer([ip])
-                res = netcheck.resolve("example.com")
-            self.assertEqual(res["state"], netcheck.BLOCKED)
+            self.assertEqual(self._resolve_with([ip])["state"], netcheck.BLOCKED)
 
     def test_zero_ip_means_blocked(self):
-        with mock.patch.object(netcheck.dns.resolver, "Resolver") as R:
-            R.return_value.resolve.return_value = _answer(["0.0.0.0"])
+        self.assertEqual(self._resolve_with(["0.0.0.0"])["state"], netcheck.BLOCKED)
+
+    def test_real_ip_means_allowed(self):
+        self.assertEqual(self._resolve_with(["93.184.216.34"])["state"],
+                         netcheck.ALLOWED)
+
+    def test_no_usable_resolver_is_reported(self):
+        """لا خادم أسماء ولا محلّل نظام = حالة صريحة، لا "غير محجوب"."""
+        with mock.patch.object(netcheck, "usable_resolver", return_value=None),                 mock.patch.object(netcheck.socket, "getaddrinfo",
+                                  side_effect=netcheck.socket.gaierror(11001, "x")):
+            res = netcheck.resolve("example.com")
+        self.assertEqual(res["state"], netcheck.NO_RESOLVER)
+
+    def test_system_resolver_fallback_classifies(self):
+        """عند سقوط dnspython نستعمل محلّل ويندوز ونصنّف النتيجة نفسها."""
+        with mock.patch.object(netcheck, "usable_resolver", return_value=None),                 mock.patch.object(netcheck.socket, "getaddrinfo",
+                                  return_value=[(2, 1, 6, "", ("0.0.0.0", 0))]):
             res = netcheck.resolve("example.com")
         self.assertEqual(res["state"], netcheck.BLOCKED)
 
-    def test_real_ip_means_allowed(self):
-        with mock.patch.object(netcheck.dns.resolver, "Resolver") as R:
-            R.return_value.resolve.return_value = _answer(["93.184.216.34"])
-            res = netcheck.resolve("example.com")
-        self.assertEqual(res["state"], netcheck.ALLOWED)
-
     def test_nxdomain_is_not_blocked(self):
         """نطاق ميت ليس نطاقًا محجوبًا - خطأ شائع يعطي أخضر كاذبًا."""
-        with mock.patch.object(netcheck.dns.resolver, "Resolver") as R:
-            R.return_value.resolve.side_effect = netcheck.dns.resolver.NXDOMAIN()
+        fake = mock.MagicMock()
+        fake.resolve.side_effect = netcheck.dns.resolver.NXDOMAIN()
+        with mock.patch.object(netcheck, "usable_resolver", return_value=fake):
             res = netcheck.resolve("dead-domain.example")
         self.assertEqual(res["state"], netcheck.INCONCLUSIVE)
 
     def test_timeout_is_not_blocked(self):
-        with mock.patch.object(netcheck.dns.resolver, "Resolver") as R:
-            R.return_value.resolve.side_effect = netcheck.dns.exception.Timeout()
+        fake = mock.MagicMock()
+        fake.resolve.side_effect = netcheck.dns.exception.Timeout()
+        with mock.patch.object(netcheck, "usable_resolver", return_value=fake):
             res = netcheck.resolve("slow.example")
         self.assertEqual(res["state"], netcheck.INCONCLUSIVE)
 

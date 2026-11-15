@@ -1,5 +1,6 @@
 """نقطة دخول واحدة: واجهة، أو خدمة، أو تثبيت ذاتي بنافذة تقدّم."""
 import multiprocessing
+import pathlib
 import sys
 
 
@@ -11,6 +12,7 @@ def _run_service() -> None:
 
 def _run_setup(args) -> None:
     """التثبيت مع نافذة صغيرة تعرض الخطوة الحالية - لا يبقى المستخدم أمام صمت."""
+    import queue
     import threading
     import tkinter as tk
     from tkinter import font as tkfont
@@ -19,7 +21,20 @@ def _run_setup(args) -> None:
     from schoolshield.arabic import ar
 
     org = args[1] if len(args) > 1 else setup_win.bundled_organization()
-    disable_password = args[2] if len(args) > 2 else ""
+    # كلمة المرور تصل عبر ملف مؤقت (لا عبر سطر الأوامر) ويُحذف فور قراءته
+    disable_password = ""
+    secret_path = args[2] if len(args) > 2 else ""
+    if secret_path:
+        handle = pathlib.Path(secret_path)
+        try:
+            disable_password = handle.read_text(encoding="utf-8").strip()
+        except OSError:
+            disable_password = ""
+        finally:
+            try:
+                handle.unlink()
+            except OSError:
+                pass
 
     root = tk.Tk()
     root.title("درع المدرسة")
@@ -39,20 +54,64 @@ def _run_setup(args) -> None:
 
     result = {"problem": None, "done": False}
 
+    messages: "queue.Queue[str]" = queue.Queue()
+
     def progress(text: str) -> None:
-        root.after(0, lambda: status.configure(text=ar(text)))
+        messages.put(text)
 
     def worker() -> None:
-        result["problem"] = setup_win.run_setup(
-            org, progress=progress, disable_password=disable_password)
-        result["done"] = True
+        # أي استثناء هنا كان يترك النافذة معلّقة إلى الأبد
+        try:
+            result["problem"] = setup_win.run_setup(
+                org, progress=progress, disable_password=disable_password)
+        except BaseException as exc:
+            result["problem"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            result["done"] = True
+
+    def dump_error(problem: str) -> str:
+        """يكتب سبب الفشل وآخر أسطر السجل على سطح المكتب ليسهل إرساله."""
+        import os
+        from schoolshield.paths import LOG_FILE
+        desktop = pathlib.Path(os.environ.get("USERPROFILE", ".")) / "Desktop"
+        out = desktop / "درع المدرسة - خطأ.txt"
+        lines = ["سبب الفشل:", str(problem), "", "آخر أسطر السجل:"]
+        try:
+            lines += LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]
+        except OSError:
+            lines.append("(لا يوجد سجل)")
+        from schoolshield.paths import DATA_DIR
+        text = chr(10).join(lines)
+        saved = ""
+        for path in (out, DATA_DIR / "logs" / "خطأ-التثبيت.txt"):
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                saved = saved or str(path)
+            except OSError:
+                pass
+        return saved
 
     def poll() -> None:
+        while True:
+            try:
+                status.configure(text=ar(messages.get_nowait()))
+            except queue.Empty:
+                break
         if result["done"]:
+            if result["problem"] == "REBOOT":
+                status.configure(text=ar("اكتمل التثبيت"), fg="#86efac")
+                hint.configure(text=ar("أعد تشغيل الحاسوب لتفعيل الحماية"))
+                tk.Button(root, text=ar("إغلاق"), command=root.destroy, bg="#1b2740",
+                          fg="#eef2ff", relief="flat").pack(pady=10)
+                result["problem"] = None
+                return
             if result["problem"]:
                 status.configure(text=ar("فشل: " + str(result["problem"])[:160]),
                                  fg="#fca5a5")
-                hint.configure(text=ar("أغلق النافذة وأعد المحاولة"))
+                saved = dump_error(result["problem"])
+                hint.configure(text=ar("التفاصيل في: درع المدرسة - خطأ.txt على سطح المكتب"
+                                       if saved else "أغلق النافذة وأعد المحاولة"))
                 tk.Button(root, text=ar("إغلاق"), command=root.destroy, bg="#1b2740",
                           fg="#eef2ff", relief="flat").pack(pady=10)
             else:

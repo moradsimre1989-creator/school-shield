@@ -8,3 +8,4 @@ installer/Cloudflare_WARP.msi
 
 # يحتوي معرّفات حساب المدرسة - لا يُنشر
 docs/SETUP-CLOUDFLARE.md
+token.cfg
