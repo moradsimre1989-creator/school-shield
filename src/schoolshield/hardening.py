@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import winreg
 from typing import Any
@@ -130,6 +131,141 @@ def remove_firewall() -> int:
     return removed
 
 
+
+# ------------------------- خوادم الأسماء -------------------------
+
+DNS_BACKUP = SECURE_DIR / "dns-backup.json"
+_LAST_DNS_FIX = [-10000.0]
+DNS_FIX_EVERY = 900  # ثانية
+
+
+def _is_filter_ns(addr: str) -> bool:
+    """خوادم عميل الفلترة المحلّية: 127.0.2.2 و127.0.2.3."""
+    return addr.strip().startswith("127.0.2.")
+
+
+def dns_state() -> list[dict[str, Any]]:
+    """خوادم الأسماء لكل بطاقة IPv4، عبر PowerShell (لا تحليل نص ipconfig)."""
+    ps = ("Get-DnsClientServerAddress -AddressFamily IPv4 | "
+          "Select-Object InterfaceIndex,InterfaceAlias,ServerAddresses | "
+          "ConvertTo-Json -Compress -Depth 4")
+    rc, out, err = run(["powershell", "-NoProfile", "-Command", ps], timeout=60)
+    if rc != 0 or not out:
+        return []
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    rows = []
+    for row in data:
+        servers = row.get("ServerAddresses") or []
+        if isinstance(servers, str):
+            servers = [servers]
+        rows.append({"index": row.get("InterfaceIndex"),
+                     "alias": str(row.get("InterfaceAlias") or ""),
+                     "servers": [str(x) for x in servers]})
+    return rows
+
+
+def dns_leaks() -> list[dict[str, Any]]:
+    """البطاقات التي تسأل خادمًا غير خادم الفلترة - وهي ثغرة الحجب.
+
+    بطاقة عميل الفلترة نفسها مستثناة: خوادمها شأنها.
+    """
+    out = []
+    for row in dns_state():
+        if "warp" in row["alias"].lower() or "cloudflare" in row["alias"].lower():
+            continue
+        if not row["servers"]:
+            continue
+        extra = [x for x in row["servers"] if not _is_filter_ns(x)]
+        if extra:
+            out.append(dict(row, extra=extra))
+    return out
+
+
+def enforce_dns() -> dict[str, Any]:
+    """يُرجع بطاقات الشبكة إلى DNS تلقائي ليملك عميل الفلترة الأسماء وحده.
+
+    خادم محلّي مضبوط يدويًا (راوتر المدرسة مثلًا) يُجيب على الاستعلامات
+    قبل الفلترة فيُلغيها كلّيًا. لا نلمس شيئًا إلا إذا كان عميل الفلترة
+    متصلًا فعلًا، وننسخ القيم القديمة أولًا كي يبقى التغيير قابلًا للتراجع.
+    """
+    import time as _t
+    from . import warp
+    leaks = dns_leaks()
+    if not leaks:
+        return {"changed": [], "skipped": "لا تسرّب"}
+    if not warp.status().get("connected"):
+        return {"changed": [], "skipped": "عميل الفلترة غير متصل - لا نلمس الشبكة"}
+    # جهة أخرى (سياسة مجال مثلًا) قد تُعيد الخادم بعد كل إصلاح. لا نكرّر
+    # الضبط وإعادة الوصل في كل دورة كي لا نُرهق الشبكة بلا طائل.
+    now = _t.monotonic()
+    if now - _LAST_DNS_FIX[0] < DNS_FIX_EVERY:
+        return {"changed": [], "skipped": "أُصلحت قريبًا - بانتظار الدورة القادمة"}
+    _LAST_DNS_FIX[0] = now
+    saved = _load_dns_backup()
+    changed, failed = [], []
+    for row in leaks:
+        alias = row["alias"]
+        saved.setdefault(alias, row["servers"])
+        rc, out, err = run(["netsh", "interface", "ipv4", "set", "dnsservers",
+                            f"name={alias}", "source=dhcp"], timeout=60)
+        if rc == 0:
+            changed.append({"alias": alias, "was": row["extra"]})
+        else:
+            failed.append(f"{alias}: {(err or out)[:80]}")
+    if changed:
+        _save_dns_backup(saved)
+        log(f"إرجاع خوادم الأسماء إلى التلقائي: {changed}")
+        try:
+            warp.reconnect()
+        except Exception as exc:
+            log(f"إعادة الوصل بعد ضبط الأسماء: {exc}")
+    return {"changed": changed, "failed": failed}
+
+
+def _load_dns_backup() -> dict[str, list[str]]:
+    try:
+        return json.loads(DNS_BACKUP.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_dns_backup(data: dict[str, list[str]]) -> None:
+    try:
+        SECURE_DIR.mkdir(parents=True, exist_ok=True)
+        DNS_BACKUP.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+    except OSError as exc:
+        log(f"تعذّر حفظ نسخة خوادم الأسماء: {exc}")
+
+
+def restore_dns() -> dict[str, Any]:
+    """يعيد ما غيّرناه - يُستدعى عند الإزالة الإدارية."""
+    saved = _load_dns_backup()
+    restored, failed = [], []
+    for alias, servers in saved.items():
+        args = ["netsh", "interface", "ipv4", "set", "dnsservers",
+                f"name={alias}", "static", servers[0], "primary"]
+        rc, out, err = run(args, timeout=60) if servers else (0, "", "")
+        if rc == 0:
+            for extra in servers[1:]:
+                run(["netsh", "interface", "ipv4", "add", "dnsservers",
+                     f"name={alias}", extra])
+            restored.append(alias)
+        else:
+            failed.append(f"{alias}: {(err or out)[:80]}")
+    if restored:
+        try:
+            DNS_BACKUP.unlink()
+        except OSError:
+            pass
+    return {"restored": restored, "failed": failed}
+
+
 def enforce_all() -> dict[str, Any]:
     """كل خطوات التشديد. تُنفَّذ من الخدمة (SYSTEM) أو من مدير مُرقّى."""
     from .policies import enforce_browser_policies
@@ -139,6 +275,7 @@ def enforce_all() -> dict[str, Any]:
         "warp_service": harden_warp_service(),
         "files": harden_files(),
         "firewall": apply_firewall(),
+        "dns": enforce_dns(),
     }
     if load_policy().get("enforce_browser_policies", True):
         out["browser_policies"] = enforce_browser_policies()

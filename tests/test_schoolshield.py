@@ -338,5 +338,48 @@ class TestDnsLeakRepair(unittest.TestCase):
         self.assertEqual(self._run(self._report("fail")).call_count, 0)
 
 
+
+class TestDnsLeakDetection(unittest.TestCase):
+    """خادم محلّي بجانب خادم الفلترة = تسرّب يُلغي الحجب."""
+
+    def _with_state(self, rows):
+        from schoolshield import hardening
+        return mock.patch.object(hardening, "dns_state", return_value=rows)
+
+    def test_local_router_is_a_leak(self):
+        from schoolshield import hardening
+        rows = [{"index": 17, "alias": "Ethernet",
+                 "servers": ["192.168.0.1", "127.0.2.2", "127.0.2.3"]}]
+        with self._with_state(rows):
+            leaks = hardening.dns_leaks()
+        self.assertEqual(len(leaks), 1)
+        self.assertEqual(leaks[0]["extra"], ["192.168.0.1"])
+
+    def test_filter_only_is_clean(self):
+        from schoolshield import hardening
+        rows = [{"index": 13, "alias": "Wi-Fi", "servers": ["127.0.2.2", "127.0.2.3"]}]
+        with self._with_state(rows):
+            self.assertEqual(hardening.dns_leaks(), [])
+
+    def test_warp_adapter_is_ignored(self):
+        from schoolshield import hardening
+        rows = [{"index": 35, "alias": "CloudflareWARP", "servers": ["1.1.1.1"]}]
+        with self._with_state(rows):
+            self.assertEqual(hardening.dns_leaks(), [])
+
+    def test_empty_adapter_is_ignored(self):
+        from schoolshield import hardening
+        with self._with_state([{"index": 7, "alias": "Ethernet", "servers": []}]):
+            self.assertEqual(hardening.dns_leaks(), [])
+
+    def test_no_network_change_when_client_disconnected(self):
+        from schoolshield import hardening, warp
+        rows = [{"index": 17, "alias": "Ethernet", "servers": ["192.168.0.1"]}]
+        with self._with_state(rows),                 mock.patch.object(warp, "status", return_value={"connected": False}),                 mock.patch.object(hardening, "run") as runner:
+            out = hardening.enforce_dns()
+        self.assertEqual(out["changed"], [])
+        runner.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
