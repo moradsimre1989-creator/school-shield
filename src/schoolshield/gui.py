@@ -35,7 +35,8 @@ STATE_LABELS = {
 # ملاحظة: لا نضع إيموجي داخل النص العربي - وجوده يُبدّل محرّك الخطوط في Tk
 # فينعكس ترتيب السطر. الدائرة الملوّنة تُرسم على Canvas مستقل بدل ذلك.
 OVERALL = {
-    "green": ("الحماية مفعّلة", GREEN, "الفلترة شغّالة واختبارات الحجب ناجحة"),
+    "green": ("درع المدرسة يعمل", GREEN, "الحماية مفعّلة - اختبارات الحجب ناجحة"),
+    "paused": ("الحماية متوقفة", MUTED, "أوقفها المدير مؤقتًا - اضغط استئناف الحماية"),
     "red": ("الحماية غير مفعّلة", RED, "الفلترة متوقفة أو فشل اختبار أساسي"),
     "amber": ("الحماية غير مكتملة", AMBER, "بعض الاختبارات لم تكتمل - اضغط تفعيل الحماية"),
     "checking": ("جارٍ التحقق", BLUE, "تنفيذ اختبارات الحجب الحقيقية..."),
@@ -62,6 +63,7 @@ class ShieldApp(tk.Tk):
         self.f_status = tkfont.Font(family=family, size=30, weight="bold")
         self.f_body = tkfont.Font(family=family, size=12)
         self.f_small = tkfont.Font(family=family, size=10)
+        self.f_main = tkfont.Font(family=family, size=17, weight="bold")
 
     def _build(self) -> None:
         header = tk.Frame(self, bg=BG)
@@ -85,20 +87,14 @@ class ShieldApp(tk.Tk):
                                 font=self.f_body, pady=(0))
         self.lbl_sub.pack(fill="x", pady=(0, 14))
 
-        self.btn = tk.Button(self, text=ar("تفعيل الحماية"), command=self._activate,
-                             bg=BLUE, fg="white", font=self.f_body, relief="flat",
+        # زر واحد فقط: شكله وفعله يتبعان حالة الحماية الحقيقية، لا العكس.
+        # الإيقاف يبقى خلف كلمة مرور المدير - الطالب لا يملكها.
+        self.btn = tk.Button(self, text=ar("تفعيل الحماية"), command=self._main_button,
+                             bg=BLUE, fg="white", font=self.f_main, relief="flat",
                              activebackground="#1d4ed8", activeforeground="white",
-                             cursor="hand2", pady=12)
-        self.btn.pack(fill="x", padx=22, pady=(0, 8))
-
-        # زر الإيقاف: يفتح طلب صلاحيات Windows ثم يسأل عن كلمة مرور المدير.
-        # الطالب بحساب عادي لا يتجاوز طلب الصلاحيات، فالزر لا يفيده.
-        self.btn_off = tk.Button(self, text=ar("إيقاف الحماية"),
-                                 command=self._toggle_off, bg=CARD, fg=MUTED,
-                                 font=self.f_small, relief="flat", cursor="hand2",
-                                 activebackground="#24324f", activeforeground=TXT,
-                                 pady=8)
-        self.btn_off.pack(fill="x", padx=22, pady=(0, 10))
+                             cursor="hand2", pady=22)
+        self.btn.pack(fill="x", padx=22, pady=(0, 12))
+        self._btn_mode = "activate"
 
         tk.Label(self, text=ar("نتائج الفحص"), bg=BG, fg=MUTED, font=self.f_small,
                  anchor="e").pack(fill="x", padx=22)
@@ -166,6 +162,8 @@ class ShieldApp(tk.Tk):
             stale = True
         if stale and overall == "green":
             overall = "amber"   # لا نقول "محمي" بناءً على تقرير قديم
+        if report.get("paused", {}).get("active"):
+            overall = "paused"  # موقوفة بقرار مدير، لا فشل حماية
         self._set_overall(overall)
         # أحمر بلا أي فشل مؤكد يعني "فحص أساسي لم يكتمل" لا "الفلترة متوقفة"
         if (overall == "red" and not report.get("paused", {}).get("active")
@@ -316,10 +314,27 @@ class ShieldApp(tk.Tk):
         if error:
             self.lbl_foot.configure(text=ar("⚠ " + error[:140]))
 
+    def _main_button(self) -> None:
+        """الزر الواحد: يفعّل حين تكون الحماية متوقفة، ويوقف حين تكون شغّالة."""
+        if self._btn_mode == "off":
+            self._toggle_off()
+        else:
+            self._activate()
+
     def _sync_off_button(self, report: dict[str, Any]) -> None:
+        """شكل الزر يتبع الحالة الفعلية المقروءة من تقرير الخدمة."""
+        if self._busy or getattr(self, "_setup_running", False):
+            return
         paused = report.get("paused", {}).get("active", False)
-        self.btn_off.configure(
-            text=ar("استئناف الحماية" if paused else "إيقاف الحماية"))
+        green = report.get("overall") == "green"
+        if paused:
+            self._btn_mode, text, bg = "activate", "استئناف الحماية", BLUE
+        elif green:
+            self._btn_mode, text, bg = "off", "إيقاف الحماية", "#334155"
+        else:
+            self._btn_mode, text, bg = "activate", "تفعيل الحماية", BLUE
+        self.btn.configure(text=ar(text), bg=bg,
+                           activebackground="#1d4ed8" if bg == BLUE else "#475569")
 
     def _tick(self) -> None:
         """تحديث دوري من ملف الحالة الذي تكتبه الخدمة."""
