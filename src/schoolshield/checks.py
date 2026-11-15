@@ -59,7 +59,18 @@ def _link_note() -> str:
         return " (عميل الفلترة غير متصل الآن)"
     if "unstable" in raw.lower():
         return " (الرابط غير مستقر - أعد الفحص بعد استقرار الشبكة)"
-    return ""
+    # العميل متصل والحجب فاشل: الاستعلامات تخرج من خادم أسماء غير خادم
+    # الفلترة. اسم الخادم هو الدليل، فنعرضه بدل ترك السبب مجهولًا.
+    try:
+        diag = netcheck.resolver_diagnostics()
+    except Exception:
+        return ""
+    servers = [s for s in diag.get("nameservers", []) if s]
+    if not servers:
+        return ""
+    if all(s.startswith("127.0.2.") for s in servers):
+        return " (خادم الأسماء سليم - راجع سياسات Cloudflare للفئة)"
+    return " | خوادم الأسماء المستعملة: " + ", ".join(servers[:4]) +            " - المفروض 127.0.2.2 (خادم الفلترة)"
 
 
 # ---------------------------- الفحوص ----------------------------

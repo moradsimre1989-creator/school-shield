@@ -147,3 +147,11 @@ def write_mdm(organization: str, *, switch_locked: bool = True,
 def connect() -> bool:
     rc, _, _ = _cli("--accept-tos", "connect")
     return rc == 0
+
+
+def reconnect() -> bool:
+    """فصل ثم وصل: يجعل العميل يعيد فرض خادم أسمائه على بطاقات الشبكة."""
+    import time
+    _cli("--accept-tos", "disconnect", timeout=30)
+    time.sleep(3)
+    return connect()

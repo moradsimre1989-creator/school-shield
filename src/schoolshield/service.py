@@ -58,6 +58,37 @@ def _ensure_client_connected() -> None:
             setup_win._register_with_token(None)
 
 
+_LAST_DNS_REPAIR = [0.0]
+DNS_REPAIR_EVERY = 600  # ثانية - لا نعيد الوصل في كل دورة
+
+
+def _repair_dns_if_leaking(report: dict[str, Any]) -> None:
+    """العميل متصل والحجب فاشل = استعلامات الأسماء تخرج خارج النفق.
+
+    إعادة وصل العميل تجعله يعيد فرض خادم أسمائه على بطاقات الشبكة، وهي
+    خطوة آمنة وقابلة للتراجع - لا نلمس إعدادات البطاقة بأنفسنا كي لا
+    نكسر خوادم المدرسة الداخلية وVeyon.
+    """
+    import time as _t
+    from . import warp
+    leaking = any(r.get("key") in ("adult_block", "violence_block")
+                  and r.get("state") == "fail"
+                  for r in report.get("checks", []))
+    if not leaking:
+        return
+    if not warp.status().get("connected"):
+        return
+    now = _t.monotonic()
+    if now - _LAST_DNS_REPAIR[0] < DNS_REPAIR_EVERY:
+        return
+    _LAST_DNS_REPAIR[0] = now
+    log("الحجب فاشل رغم الاتصال - إعادة وصل العميل لإعادة فرض خادم الأسماء")
+    try:
+        warp.reconnect()
+    except Exception as exc:
+        log(f"إعادة الوصل خطأ: {exc}")
+
+
 def _verify_and_publish() -> dict[str, Any]:
     from . import checks
     report = checks.run_all()
@@ -84,7 +115,13 @@ def cycle(enforce: bool = True) -> dict[str, Any]:
                 _ensure_client_connected()
             except Exception as exc:
                 log(f"connect خطأ: {exc}")
-        return _verify_and_publish()
+        report = _verify_and_publish()
+        if enforce and not paused:
+            try:
+                _repair_dns_if_leaking(report)
+            except Exception as exc:
+                log(f"إصلاح الأسماء خطأ: {exc}")
+        return report
 
 
 # --------------------------- قناة IPC ---------------------------

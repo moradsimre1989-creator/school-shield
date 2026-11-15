@@ -302,5 +302,41 @@ class TestRegistrationParsing(unittest.TestCase):
         self.assertFalse(reg["team_managed"])
 
 
+
+class TestDnsLeakRepair(unittest.TestCase):
+    """العميل متصل والحجب فاشل = إعادة وصل واحدة، لا في كل دورة."""
+
+    def setUp(self):
+        from schoolshield import service
+        self.service = service
+        service._LAST_DNS_REPAIR[0] = -10000.0
+
+    def _report(self, state):
+        return {"checks": [{"key": "adult_block", "state": state},
+                           {"key": "violence_block", "state": state}]}
+
+    def _run(self, report, connected=True):
+        from schoolshield import warp
+        with mock.patch.object(warp, "status",
+                               return_value={"connected": connected, "ok": True,
+                                             "raw": ""}),                 mock.patch.object(warp, "reconnect", return_value=True) as rc:
+            self.service._repair_dns_if_leaking(report)
+        return rc
+
+    def test_reconnects_when_blocking_fails(self):
+        self.assertEqual(self._run(self._report("fail")).call_count, 1)
+
+    def test_no_reconnect_when_blocking_passes(self):
+        self.assertEqual(self._run(self._report("pass")).call_count, 0)
+
+    def test_no_reconnect_when_client_disconnected(self):
+        rc = self._run(self._report("fail"), connected=False)
+        self.assertEqual(rc.call_count, 0)
+
+    def test_rate_limited_to_one_per_window(self):
+        self.assertEqual(self._run(self._report("fail")).call_count, 1)
+        self.assertEqual(self._run(self._report("fail")).call_count, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
