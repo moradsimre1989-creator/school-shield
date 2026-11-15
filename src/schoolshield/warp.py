@@ -35,12 +35,17 @@ def registration() -> dict[str, Any]:
         rc, out, err = _cli(*args)
         text = out or err
         if rc == 0 and text:
+            # "Account type: Team" ليس اسم المؤسسة. الاسم في سطر Organization
+            # وحده؛ أي سطر آخر يُهمل وإلا قارنّا "Team" باسم المدرسة.
             org = None
-            m = re.search(r"(?:Organization|Account type|Team)\s*:\s*(\S+)", text, re.I)
+            m = re.search(r"^\s*(?:Organization|Team\s*name)\s*:\s*(\S+)",
+                          text, re.I | re.M)
             if m:
-                org = m.group(1)
+                org = m.group(1).strip()
+            managed = bool(org) or bool(
+                re.search(r"^\s*Account type\s*:\s*Team\b", text, re.I | re.M))
             return {"ok": True, "raw": text, "organization": org,
-                    "team_managed": "Team" in text or bool(org)}
+                    "team_managed": managed}
     return {"ok": False, "raw": "", "organization": None, "team_managed": False}
 
 

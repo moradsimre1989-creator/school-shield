@@ -189,8 +189,16 @@ def _student_is_admin() -> dict[str, str]:
              if m.lower() not in ("administrator", "domain admins", "admin")]
     detail = "الأعضاء: " + ", ".join(members[:6])
     if me and any(me.lower() in m.lower() for m in members):
-        return _item("حساب الطالب ليس عضوًا في Administrators", FAIL,
-                     f"الحساب الحالي ({me}) عضو في Administrators. {detail}")
+        # الفحص عن حساب الطالب لا عن حساب المدير. إن كان المدير وحده هو
+        # العضو غير المدمج فلا دليل على خلل؛ الدليل يأتي من حساب الطالب.
+        others = [m for m in risky if me.lower() not in m.lower()]
+        if others:
+            return _item("حساب الطالب ليس عضوًا في Administrators", FAIL,
+                         "حسابات أخرى عضو في Administrators: "
+                         + ", ".join(others[:4]) + f". {detail}")
+        return _item("حساب الطالب ليس عضوًا في Administrators", UNVERIFIED,
+                     f"الفحص يجري من حساب المدير ({me}) - أعد الفحص بعد "
+                     f"الدخول بحساب الطالب. {detail}")
     if len(risky) > 1:
         return _item("حساب الطالب ليس عضوًا في Administrators", UNVERIFIED,
                      "يوجد أكثر من حساب مدير - راجع القائمة. " + detail)

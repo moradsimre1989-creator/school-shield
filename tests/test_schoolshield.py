@@ -15,7 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from schoolshield import checks, netcheck  # noqa: E402
+from schoolshield import checks, netcheck, warp  # noqa: E402
 from schoolshield.config import CF_BLOCK_IPS  # noqa: E402
 
 
@@ -272,6 +272,34 @@ def _answer(ips: list[str]):
     ans.__iter__.return_value = iter(recs)
     ans.response.answer = []
     return ans
+
+
+class TestRegistrationParsing(unittest.TestCase):
+    """Account type: Team ليس اسم المؤسسة - كانت تُقارَن باسم المدرسة."""
+
+    REAL = ("Account type: Team\n"
+            "ID: 01a1c887-04b6-10bc-86c3-a817d0ef1682\n"
+            "Account ID: 130b12d56cda22a297ea0b50bc40007b\n"
+            "Organization: floral-unit-bae6\n")
+
+    def _reg(self, text, rc=0):
+        with mock.patch.object(warp, "_cli", return_value=(rc, text, "")):
+            return warp.registration()
+
+    def test_organization_not_account_type(self):
+        reg = self._reg(self.REAL)
+        self.assertEqual(reg["organization"], "floral-unit-bae6")
+        self.assertTrue(reg["team_managed"])
+
+    def test_team_account_without_org_line_is_managed(self):
+        reg = self._reg("Account type: Team\nID: abc\n")
+        self.assertIsNone(reg["organization"])
+        self.assertTrue(reg["team_managed"])
+
+    def test_personal_account_is_not_team_managed(self):
+        reg = self._reg("Account type: Free\nID: abc\n")
+        self.assertIsNone(reg["organization"])
+        self.assertFalse(reg["team_managed"])
 
 
 if __name__ == "__main__":

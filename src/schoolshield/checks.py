@@ -45,6 +45,23 @@ def _batch(domains: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _link_note() -> str:
+    """سبب شائع لتسرّب DNS: العميل متصل لكن الرابط غير مستقر أو لم يستقر بعد.
+
+    لا يُلغي الفشل - الجهاز فعلًا بلا فلترة في تلك اللحظة - لكنه يشرح سببه.
+    """
+    try:
+        st = warp.status()
+    except Exception:
+        return ""
+    raw = st.get("raw", "")
+    if not st.get("connected"):
+        return " (عميل الفلترة غير متصل الآن)"
+    if "unstable" in raw.lower():
+        return " (الرابط غير مستقر - أعد الفحص بعد استقرار الشبكة)"
+    return ""
+
+
 # ---------------------------- الفحوص ----------------------------
 
 def check_client() -> dict[str, Any]:
@@ -110,10 +127,13 @@ def check_adult_block() -> dict[str, Any]:
     if extra_allowed and not allowed:
         return _result("adult_block", title, FAIL,
                        "نطاقات فئة الإباحية غير محجوبة: "
-                       + ", ".join(i["domain"] for i in extra_allowed), items)
+                       + ", ".join(i["domain"] for i in extra_allowed)
+                       + _link_note(), items)
     if allowed:
         return _result("adult_block", title, FAIL,
-                       "نطاقات غير محجوبة: " + ", ".join(i["domain"] for i in allowed), items)
+                       "نطاقات غير محجوبة: "
+                       + ", ".join(i["domain"] for i in allowed)
+                       + _link_note(), items)
     if not blocked:
         return _result("adult_block", title, UNVERIFIED,
                        "لم يكتمل أي استعلام DNS - تحقّق من الشبكة", items)
@@ -135,7 +155,9 @@ def check_violence_block() -> dict[str, Any]:
     blocked = [i for i in items if i["state"] == BLOCKED]
     if allowed:
         return _result("violence_block", title, FAIL,
-                       "نطاقات غير محجوبة: " + ", ".join(i["domain"] for i in allowed), items)
+                       "نطاقات غير محجوبة: "
+                       + ", ".join(i["domain"] for i in allowed)
+                       + _link_note(), items)
     if not blocked:
         return _result("violence_block", title, UNVERIFIED,
                        "النطاقات غير حاسمة (غير موجودة أو تعذّر الاستعلام)", items)

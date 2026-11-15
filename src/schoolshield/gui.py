@@ -167,6 +167,11 @@ class ShieldApp(tk.Tk):
         if stale and overall == "green":
             overall = "amber"   # لا نقول "محمي" بناءً على تقرير قديم
         self._set_overall(overall)
+        # أحمر بلا أي فشل مؤكد يعني "فحص أساسي لم يكتمل" لا "الفلترة متوقفة"
+        if (overall == "red" and not report.get("paused", {}).get("active")
+                and int(report.get("summary", {}).get("fail", 0)) == 0):
+            self.lbl_sub.configure(
+                text=ar("فحص أساسي لم يكتمل - لا يوجد فشل مؤكد"))
         self._write_details(report.get("checks", []))
         self._sync_off_button(report)
         summary = report.get("summary", {})
